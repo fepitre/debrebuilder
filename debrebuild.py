@@ -478,6 +478,51 @@ Binary::apt-get::Acquire::AllowInsecureRepositories "false";
                 pkg.to_apt_install_format(self.buildinfo.build_arch))
         return apt_build_depends
 
+    def dpkg(self, output):
+        try:
+            builder_architecture = subprocess.check_output(
+                "dpkg --print-architecture").decode('utf8').rstrip('\n')
+        except FileNotFoundError:
+            raise RebuilderException("Cannot determinate builder host architecture")
+
+        if self.buildinfo.build_arch != builder_architecture:
+            raise RebuilderException(
+                "Must be run on {}".format(self.buildinfo.build_arch))
+
+        if os.getuid() != 0:
+            raise RebuilderException("You must be root for the dpkg builder")
+
+        if os.path.exists(self.buildinfo.build_path):
+            raise RebuilderException(
+                "Refusing to overwrite existing {}".format(
+                    self.buildinfo.build_path))
+
+        sources_list = "/etc/apt/apt.conf.d/23-debrebuild.conf"
+        if os.path.exists(sources_list):
+            raise RebuilderException(
+                "Refusing to overwrite existing {}".format(sources_list))
+
+        with open(sources_list, "w") as fd:
+            fd.write("\n".join(self.get_sources_list()))
+
+        with open("/etc/apt/apt.conf.d/23-debrebuild.conf", "w") as fd:
+            apt_conf = """
+        Acquire::Check-Valid-Until "false";
+        Acquire::http::Dl-Limit "1000";
+        Acquire::https::Dl-Limit "1000";
+        Acquire::Retries "5";
+        Binary::apt-get::Acquire::AllowInsecureRepositories "false";
+        """
+            fd.write(apt_conf)
+
+        for keyring_src in self.extra_repository_keys:
+            keyring_dst = "/etc/apt/trusted.gpg.d/{}".format(
+                os.path.basename(keyring_src))
+            if os.path.exists(keyring_dst):
+                raise RebuilderException(
+                    "Refusing to overwrite existing {}".format(keyring_dst))
+            os.symlink(keyring_src, keyring_dst)
+
     def mmdebstrap(self, output):
         # WIP
         if self.buildinfo.build_archany and self.buildinfo.build_archall:
