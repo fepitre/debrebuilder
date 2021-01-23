@@ -617,6 +617,53 @@ Binary::apt-get::Acquire::AllowInsecureRepositories "false";
         if subprocess.run(cmd).returncode != 0:
             raise RebuilderException("mmdebstrap failed")
 
+    def sbuild(self, output):
+        cmd = [
+            'sudo', 'env', '--chdir={}'.format(output)
+        ]
+        cmd += self.get_env()
+        cmd += ["sbuild", "-D"]
+        for repo in self.get_sources_list() + self.required_timestamp_sources:
+            cmd += ['--extra-repository="{}"'.format(repo)]
+        #
+        # for key in self.extra_repository_keys:
+        #     cmd += ['--extra-repository-key='.format(key)]
+
+        cmd += [
+            '--chroot-setup-commands=echo Acquire::Check-Valid-Until "false"\n--aptopt=Acquire::http::Dl-Limit "1000";\n--aptopt=Acquire::https::Dl-Limit "1000";\n--aptopt=Acquire::Retries "5";\n--aptopt=APT::Get::allow-downgrades "true"; | tee /etc/apt/apt.conf.d/23-debrebuild.conf',
+            '--chroot-setup-commands=apt-get --yes remove build-essential libc6-dev gcc g++ make dpkg-dev',
+            '--chroot-setup-commands=apt-get --yes autoremove',
+            '--add-depends={}'.format(' '.join(self.get_apt_build_depends())),
+            '--build={}'.format(self.buildinfo.build_arch),
+            '--host={}'.format(self.buildinfo.host_arch),
+        ]
+        if self.buildinfo.build_source:
+            cmd += ['--source']
+        else:
+            cmd += ['--no-source']
+        if self.buildinfo.build_archany:
+            cmd += ['--arch-any']
+        else:
+            cmd += ['--no-arch-any']
+        if self.buildinfo.build_archall:
+            cmd += ['--arch-all']
+        else:
+            cmd += ['--no-arch-all']
+        cmd += [
+            '--dist={}'.format(self.buildinfo.get_debian_suite()),
+            '--no-run-lintian',
+            '--no-run-autopkgtest',
+            '--no-apt-upgrade',
+            '--no-apt-distupgrade',
+            '--bd-uninstallable-explainer=',
+            '--build-dep-resolver=aspcud',
+            '--build-path={}'.format(self.buildinfo.build_path),
+            '{}_{}'.format(self.buildinfo.source, self.buildinfo.version)
+        ]
+        logger.debug(' '.join(cmd))
+        if subprocess.run(cmd).returncode != 0:
+            raise RebuilderException("sbuild failed")
+
     def verify_checksums(self, new_buildinfo):
         files = [f for f in self.buildinfo.checksums.keys() if not f.endswith('.dsc')]
         new_files = new_buildinfo.checksums.keys()
@@ -708,6 +755,8 @@ Binary::apt-get::Acquire::AllowInsecureRepositories "false";
             return
         if builder == "mmdebstrap":
             self.mmdebstrap(output, build_arch)
+        if builder == "sbuild":
+            self.sbuild(output)
 
         # Stage 3: Everything post-build actions with rebuild artifacts
         new_buildinfo = BuildInfo(realpath(new_buildinfo_file))
@@ -799,7 +848,7 @@ def main():
     else:
         logger.setLevel(logging.ERROR)
 
-    if args.builder not in ("none", "mmdebstrap"):
+    if args.builder not in ("none", "mmdebstrap", "sbuild"):
         logger.error("Unknown builder: {}".format(args.builder))
         return 1
 

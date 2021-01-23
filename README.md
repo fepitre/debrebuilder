@@ -53,3 +53,6 @@ The desired backend is chosen using the --builder option. The default is
 
     mmdebstrap      Use mmdebstrap to build the package. This requires no
                     setup and no superuser privileges.
+
+    sbuild          Use sbuild to build the package. This requires sbuild to be
+                    setup with schroot chroots of Debian stable distributions.
